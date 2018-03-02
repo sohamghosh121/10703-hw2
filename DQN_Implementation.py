@@ -5,10 +5,12 @@ import random
 import math
 
 from keras.models import Model
-from keras.layers import Input, Dense
+from keras.layers import Input, Dense, Activation
 from keras.optimizers import SGD
+import json
 
 from keras.models import load_model
+from collections import deque
 
 
 STATE_SPACE = {
@@ -31,13 +33,14 @@ class Replay_Memory():
 
 		# Burn in episodes define the number of episodes that are written into the memory from the 
 		# randomly initialized agent. Memory size is the maximum size after which old elements in the memory are replaced. 
-		# A simple (if not the most efficient) was to implement the memory is as a list of transitions. 
+		# A simple (if not the most efficient) was to implement the memory is as a list of transitions.
+		self.memory = deque([], memory_size)
 		self.memory_size = memory_size
 		self.burn_in = burn_in
 		self.memory_full = False
 		
 
-	def sample_batch(self, batch_size=128):
+	def sample_batch(self, batch_size=32):
 		# This function returns a batch of randomly sampled transitions - i.e. state, action, reward, next state, terminal flag tuples. 
 		# You will feed this to your model to train.
 		sampled = random.sample(self.memory, batch_size)
@@ -46,11 +49,12 @@ class Replay_Memory():
 
 	def append(self, transition):
 		# Appends transition to the memory.
-		if len(self.memory) >= self.memory_size:
-			self.memory_full = True
-			self.memory = self.memory[len(self.memory) - self.memory_size + 1:] + [transition]
-		else:
-			self.memory.append(transition)
+		self.memory.append(transition)
+		# if len(self.memory) >= self.memory_size:
+		# 	self.memory_full = True
+		# 	self.memory = self.memory[len(self.memory) - self.memory_size + 1:] + [transition]
+		# else:
+		# 	self.memory.append(transition)
 
 
 """
@@ -62,7 +66,7 @@ class QNetwork():
 	# The network should take in state of the world as an input, 
 	# and output Q values of the actions available to the agent as the output. 
 
-	def __init__(self, environment_name, gamma=1.0, alpha=0.0001, num_past_states=4):
+	def __init__(self, environment_name, gamma=0.99, alpha=0.0001, num_past_states=4):
 		# Define your network architecture here. It is also a good idea to define any training operations 
 		# and optimizers here, initialize your variables, or alternately compile your model here. 
 		self.name = 'VanillaQNetwork'
@@ -109,8 +113,8 @@ class QNetwork():
 
 class LinearQNetwork(QNetwork):
 	def __init__(self, environment_name, gamma=0.99, alpha=0.0001, num_past_states=4):
-		super(LinearQNetwork, self).__init__(environment_name, gamma, alpha)
 		self.name = 'LinearQNetwork'
+		super(LinearQNetwork, self).__init__(environment_name, gamma, alpha)
 
 	def init_network(self):
 		self.input_size = (1, STATE_SPACE[self.environment_name] * self.num_past_states)
@@ -123,10 +127,10 @@ class LinearQNetwork(QNetwork):
 
 class DeepQNetwork(QNetwork): # MLP
 	def __init__(self, environment_name, gamma=0.99, alpha=0.0001, num_past_states=4, hidden_sizes=[10], activation='tanh'):
-		super(LinearQNetwork, self).__init__(environment_name, gamma, alpha)
 		self.name = 'DeepQNetwork'
 		self.hidden_sizes = hidden_sizes
 		self.activation = activation
+		super(DeepQNetwork, self).__init__(environment_name, gamma, alpha)
 
 	def init_network(self):
 		self.input_size = (1, STATE_SPACE[self.environment_name] * self.num_past_states)
@@ -183,7 +187,7 @@ class DQN_Agent():
 		# Creating epsilon greedy probabilities to sample from.
 		coin = np.random.random()
 		greedy_action = self.greedy_policy(q_values)
-		if epsilon > coin:
+		if coin > epsilon:
 			return greedy_action 
 		else:
 			return np.random.choice([x for x in range(len(q_values)) if x != greedy_action])
@@ -198,7 +202,7 @@ class DQN_Agent():
 
 		# If you are using a replay memory, you should interact with environment here, and store these 
 		# transitions to memory, while also updating your model.
-		decay_factor = math.log(epsilon_T/epsilon_0)/float(num_episodes)
+		decay_factor = 10 ** (math.log10(epsilon_T/epsilon_0)/float(num_episodes))
 
 		if experience_replay:
 			self.burn_in_memory()
@@ -208,12 +212,14 @@ class DQN_Agent():
 			done = False
 			s = self.env.reset()
 			last_few_states = [s]
+			reward = 0
 			while not done:
 				if len(last_few_states) == 4:
 					a = self.epsilon_greedy_policy(eps, self.Q.get_Qvalues(np.concatenate(last_few_states)))
 				else:
 					a = self.env.action_space.sample()
 				s_, r, done, info = self.env.step(a)
+				reward += r
 				if not experience_replay:
 					if len(last_few_states) >= 4:
 						self.Q.train(
@@ -247,7 +253,7 @@ class DQN_Agent():
 		while not done:
 			# print(s, self.Q.get_Qvalues(s))
 			if len(last_few_states) >= 4:
-				a = self.greedy_policy(self.Q.get_Qvalues(np.concatenate(last_few_states)))
+				a = self.epsilon_greedy_policy(0.05, self.Q.get_Qvalues(np.concatenate(last_few_states)))
 			else:
 				a = self.env.action_space.sample()
 			s_, r, done, info = self.env.step(a)
@@ -302,8 +308,13 @@ def parse_arguments():
 	parser.add_argument('--render',dest='render',type=int,default=0)
 	parser.add_argument('--train',dest='train',type=int,default=1)
 	parser.add_argument('--test',dest='test',type=int,default=20)
-	parser.add_argument('--model',dest='model_file',type=str)
 	parser.add_argument('--replay',dest='experience_replay',type=int,default=0)
+	parser.add_argument('--batch_size',dest='batch_size',type=int,default=32)
+	parser.add_argument('--gamma',dest='gamma',type=float,default=0.99)
+	parser.add_argument('--alpha',dest='alpha',type=float,default=0.0001)
+	parser.add_argument('--model',dest='model',type=str,default='LinearQNetwork')
+	parser.add_argument('--model_file', dest='model_file',type=str)
+	parser.add_argument('--model_params',dest='model_params',type=str,default='\{\}')
 	return parser.parse_args()
 
 def main(args):
@@ -318,11 +329,38 @@ def main(args):
 
 	# You want to create an instance of the DQN_Agent class here, and then train / test it. 
 	
+	try:
+		model_params = json.loads(args.model_params)
+	except:
+		model_params = {}
+
+
+	if args.model == 'LinearQNetwork':
+		Q = LinearQNetwork(environment_name,
+			gamma=args.gamma,
+			alpha=args.alpha)
+	elif args.model == 'DeepQNetwork':
+		hidden_sizes = model_params.get('hidden_sizes', [10])
+		Q = DeepQNetwork(environment_name, 
+			gamma=args.gamma,
+			alpha=args.alpha,
+			hidden_sizes=hidden_sizes)
+	elif args.model == 'DuelingDeepNetwork':
+		pass
+	else:
+		print("Missing model name")
+		exit()
+	
+	if args.model_file:
+		Q.load_model_weights(args.model_file)
+
 	agent = DQN_Agent(environment_name)
-	agent.Q_network(LinearQNetwork(environment_name, alpha=0.001))
+	agent.Q_network(Q)
+
 
 	if args.train:
 		agent.train(experience_replay=args.experience_replay, num_episodes=args.train)
+
 
 	avg_reward = agent.test(render=args.render, num_episodes=args.test)
 	print(avg_reward)
