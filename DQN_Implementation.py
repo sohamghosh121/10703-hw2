@@ -10,9 +10,11 @@ import math
 
 from keras.models import Model, load_model
 from keras.initializers import RandomNormal
-from keras.layers import Input, Dense, Activation
+from keras.layers import Input, Dense, Activation, Merge, Lambda
 from keras.optimizers import Adam
 import json
+
+import keras.backend as K
 
 
 from collections import deque
@@ -167,7 +169,76 @@ class DeepQNetwork(QNetwork): # MLP
 
 
 class DuelingDeepQNetwork(QNetwork):
-	pass
+	def __init__(self,
+			environment_name,
+			gamma=0.99,
+			alpha=0.0001,
+			num_past_states=4,
+			shared_hidden_sizes=[10],
+			value_advantage_hidden_sizes=[10],
+			action_advantage_hidden_sizes=[10],
+			activation='relu'):
+		self.name = 'DuelingDeepQNetwork'
+		self.shared_hidden_sizes = shared_hidden_sizes
+		self.value_advantage_hidden_sizes = value_advantage_hidden_sizes
+		self.action_advantage_hidden_sizes = action_advantage_hidden_sizes
+		self.activation = activation
+		super(DuelingDeepQNetwork, self).__init__(environment_name, gamma, alpha)
+
+	def init_network(self):
+		self.input_size = (1, STATE_SPACE[self.environment_name] * self.num_past_states)
+		self.inputs = Input(shape=(STATE_SPACE[self.environment_name] * self.num_past_states, )) # we take past 4 states
+		self.shared_hidden_layers = []
+		for i, h_sz in enumerate(self.shared_hidden_sizes):
+			if i == 0:
+				h_layer = Dense(h_sz)(self.inputs)
+				h_layer = Activation(self.activation)(h_layer)
+			else:
+				h_layer = Dense(h_sz)(self.shared_hidden_layers[-1])
+				h_layer = Activation(self.activation)(h_layer)
+			self.shared_hidden_layers.append(h_layer)
+
+		self.value_adv_hidden_layers = []
+		for i, h_sz in enumerate(self.value_advantage_hidden_sizes):
+			if i == 0:
+				h_layer = Dense(h_sz)(self.shared_hidden_layers[-1])
+				h_layer = Activation(self.activation)(h_layer)
+			else:
+				h_layer = Dense(h_sz)(self.value_adv_hidden_layers[-1])
+				h_layer = Activation(self.activation)(h_layer)
+			self.value_adv_hidden_layers.append(h_layer)
+
+		self.action_adv_hidden_layers = []
+		for i, h_sz in enumerate(self.action_advantage_hidden_sizes):
+			if i == 0:
+				h_layer = Dense(h_sz)(self.shared_hidden_layers[-1])
+				h_layer = Activation(self.activation)(h_layer)
+			else:
+				h_layer = Dense(h_sz)(self.action_adv_hidden_layers[-1])
+				h_layer = Activation(self.activation)(h_layer)
+			self.action_adv_hidden_layers.append(h_layer)
+
+		self.value_advantage_out = Dense(1)(self.value_adv_hidden_layers[-1])
+
+		def get_action_advantage(x):
+			means = K.mean(x, axis=1, keepdims=True)
+			advantage = x - means
+			return advantage
+
+		def add_advantages(inputs):
+			val_adv, act_adv = inputs
+			return val_adv + act_adv
+
+		output_shape = (ACTION_SPACE[self.environment_name],)
+
+		self.action_value = Dense(ACTION_SPACE[self.environment_name])(self.action_adv_hidden_layers[-1])
+		self.action_advantage_out = Lambda(get_action_advantage, output_shape=output_shape)(self.action_value)
+
+		self.final_output = Merge(mode=add_advantages, output_shape=output_shape)([self.value_advantage_out, self.action_advantage_out])
+
+		self.model = Model(inputs=self.inputs, outputs=self.final_output)
+		opt = Adam(lr=self.alpha)
+		self.model.compile(optimizer=opt, loss='mean_squared_error')
 
 
 class ConvDuelingDeepQNetwork(QNetwork):
@@ -369,13 +440,21 @@ def main(args):
 			gamma=args.gamma,
 			alpha=args.alpha)
 	elif args.model == 'DeepQNetwork':
-		hidden_sizes = model_params.get('hidden_sizes', [10, 10, 10])
+		hidden_sizes = [10, 10, 10]
 		Q = DeepQNetwork(environment_name, 
 			gamma=args.gamma,
 			alpha=args.alpha,
 			hidden_sizes=hidden_sizes)
-	elif args.model == 'DuelingDeepNetwork':
-		pass
+	elif args.model == 'DuelingDeepQNetwork':
+		shared_hidden_sizes = [10,10]
+		value_advantage_hidden_sizes = [5,5]
+		action_advantage_hidden_sizes = [5,5]
+		Q = DuelingDeepQNetwork(environment_name, 
+			gamma=args.gamma,
+			alpha=args.alpha,
+			shared_hidden_sizes=shared_hidden_sizes,
+			value_advantage_hidden_sizes=value_advantage_hidden_sizes,
+			action_advantage_hidden_sizes=action_advantage_hidden_sizes)
 	else:
 		print("Missing model name")
 		exit()
