@@ -471,16 +471,16 @@ def main(args):
 			alpha=args.alpha,
 			num_past_states=args.num_past_states)
 	elif args.model == 'DeepQNetwork':
-		hidden_sizes = [10, 10, 10]
+		hidden_sizes = [30, 30, 30]
 		Q = DeepQNetwork(environment_name, 
 			gamma=args.gamma,
 			alpha=args.alpha,
 			hidden_sizes=hidden_sizes,
 			num_past_states=args.num_past_states)
 	elif args.model == 'DuelingDeepQNetwork':
-		shared_hidden_sizes = [10,10]
-		value_advantage_hidden_sizes = [10]
-		action_advantage_hidden_sizes = [10]
+		shared_hidden_sizes = [30,30]
+		value_advantage_hidden_sizes = [30]
+		action_advantage_hidden_sizes = [30]
 		Q = DuelingDeepQNetwork(environment_name, 
 			gamma=args.gamma,
 			alpha=args.alpha,
