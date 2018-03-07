@@ -84,7 +84,6 @@ class Replay_Memory():
 		# else:
 		# 	self.memory.append(transition)
 
-
 """
 	Q-Networks
 """
@@ -147,8 +146,8 @@ class LinearQNetwork(QNetwork):
 		self.input_size = (1, STATE_SPACE[self.environment_name] * self.num_past_states)
 		self.inputs = Input(shape=(STATE_SPACE[self.environment_name] * self.num_past_states, )) # we take past 4 states
 		self.outputs = Dense(ACTION_SPACE[self.environment_name],
-			kernel_initializer=TruncatedNormal(mean=0.0, stddev=0.5, seed=None),
-			bias_initializer=TruncatedNormal(mean=0.0, stddev=0.5, seed=None)
+			kernel_initializer='glorot_normal',
+			bias_initializer='glorot_normal'
 		)(self.inputs)
 
 		# self.outputs = Dense(ACTION_SPACE[self.environment_name],
@@ -274,7 +273,7 @@ class DQN_Agent():
 	# (4) Create a function to test the Q Network's performance on the environment.
 	# (5) Create a function for Experience Replay.
 	
-	def __init__(self, environment_name, render=False, save_dir='.', num_past_states=10):
+	def __init__(self, environment_name, render=False, save_dir='.', num_past_states=10, repeated_sampling=0):
 
 		# Create an instance of the network itself, as well as the memory. 
 		# Here is also a good place to set environmental parameters,
@@ -284,6 +283,7 @@ class DQN_Agent():
 		self.replay_memory = Replay_Memory()
 		self.env = gym.make(environment_name)
 		self.save_dir = save_dir
+		self.repeated_sampling = repeated_sampling
 
 	def Q_network(self, qnet):
 		self.Q = qnet
@@ -318,17 +318,26 @@ class DQN_Agent():
 		for t in range(num_episodes):
 			done = False
 			s = self.env.reset()
-			# self.env.render()
+			if self.render:
+				self.env.render()
 			last_few_states = [s]
 			reward = 0
 			steps = 0
+			repeats_left = self.repeated_sampling
+			a = None
 			while not done:
 				eps = max(epsilon_T, epsilon_0 - total_iterations * decay_factor)
-				if len(last_few_states) == self.num_past_states:
+				if len(last_few_states) == self.num_past_states and repeats_left == 0:
 					a = self.epsilon_greedy_policy(eps, self.Q.get_Qvalues(np.concatenate(last_few_states)))
-				else:
+					repeats_left = self.repeated_sampling
+				elif len(last_few_states) < self.num_past_states:
 					a = self.env.action_space.sample()
+				elif a is None: # last corner case
+					a = self.epsilon_greedy_policy(eps, self.Q.get_Qvalues(np.concatenate(last_few_states)))
+				repeats_left -= 1
 				s_, r, done, info = self.env.step(a)
+				if self.render:
+					self.env.render()
 				reward += r
 				if not experience_replay:
 					if len(last_few_states) >= self.num_past_states:
@@ -353,16 +362,14 @@ class DQN_Agent():
 					last_few_states.append(s)
 				steps += 1
 				total_iterations += 1
-				# if done and steps < 200:
-				# 	print('reached goal', steps)
 
 			training_rewards.append(reward)
 			
 			print_dot()	
 			if (t + 1) % 10 == 0:
-				avg_reward = self.test(render=False)
-				sys.stdout.write(str(len(training_rewards)) + 'Training Reward  ' + str(np.mean(training_rewards)))
-				sys.stdout.write(' Testing epoch ' +  str(t + 1) + ':   ' + str(avg_reward) + '\n')
+				avg_reward = self.test(render=self.render)
+				sys.stdout.write(' Training Reward  ' + str(np.mean(training_rewards)))
+				sys.stdout.write(' Testing Reward @ epoch ' +  str(t + 1) + ':   ' + str(avg_reward) + '\n')
 				self.Q.save_model_weights(self.save_dir + '/epoch-%d' % (t + 1))
 				best_reward = avg_reward
 				training_rewards = []
@@ -441,6 +448,7 @@ def parse_arguments():
 	parser.add_argument('--model_file', dest='model_file',type=str)
 	parser.add_argument('--exp_folder',dest='exp_folder',type=str,default='.')
 	parser.add_argument('--num_past_states',dest='num_past_states',type=int,default=4)
+	parser.add_argument('--repeated_sampling',dest='repeated_sampling',type=int,default=0)
 	return parser.parse_args()
 
 def main(args):
@@ -486,9 +494,11 @@ def main(args):
 	if args.model_file:
 		Q.load_model_weights(args.model_file)
 
-	agent = DQN_Agent(environment_name, 
+	agent = DQN_Agent(environment_name,
+			render=False, 
 			save_dir=args.exp_folder,
-			num_past_states=args.num_past_states)
+			num_past_states=args.num_past_states,
+			repeated_sampling=args.repeated_sampling)
 	agent.Q_network(Q)
 
 
@@ -506,3 +516,5 @@ def main(args):
 
 if __name__ == '__main__':
 	main(sys.argv)
+
+
