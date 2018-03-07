@@ -84,7 +84,6 @@ class Replay_Memory():
 		# else:
 		# 	self.memory.append(transition)
 
-
 """
 	Q-Networks
 """
