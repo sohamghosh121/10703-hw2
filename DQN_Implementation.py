@@ -316,6 +316,7 @@ class DQN_Agent():
 		training_rewards = []
 		total_iterations = 0
 		for t in range(num_episodes):
+			eps = max(epsilon_T, epsilon_0 - t * decay_factor)
 			done = False
 			s = self.env.reset()
 			if self.render:
@@ -326,7 +327,6 @@ class DQN_Agent():
 			repeats_left = self.repeated_sampling
 			a = None
 			while not done:
-				eps = max(epsilon_T, epsilon_0 - total_iterations * decay_factor)
 				if len(last_few_states) == self.num_past_states and repeats_left == 0:
 					a = self.epsilon_greedy_policy(eps, self.Q.get_Qvalues(np.concatenate(last_few_states)))
 					repeats_left = self.repeated_sampling
@@ -334,7 +334,8 @@ class DQN_Agent():
 					a = self.env.action_space.sample()
 				elif a is None: # last corner case
 					a = self.epsilon_greedy_policy(eps, self.Q.get_Qvalues(np.concatenate(last_few_states)))
-				repeats_left -= 1
+				else:
+					repeats_left -= 1
 				s_, r, done, info = self.env.step(a)
 				if self.render:
 					self.env.render()
@@ -366,7 +367,7 @@ class DQN_Agent():
 			training_rewards.append(reward)
 			
 			print_dot()	
-			if (t + 1) % 10 == 0:
+			if (t + 1) % 100 == 0:
 				avg_reward = self.test(render=self.render)
 				sys.stdout.write(' Training Reward  ' + str(np.mean(training_rewards)))
 				sys.stdout.write(' Testing Reward @ epoch ' +  str(t + 1) + ':   ' + str(avg_reward) + '\n')
@@ -470,7 +471,7 @@ def main(args):
 			alpha=args.alpha,
 			num_past_states=args.num_past_states)
 	elif args.model == 'DeepQNetwork':
-		hidden_sizes = [30, 30, 30]
+		hidden_sizes = [10, 10, 10]
 		Q = DeepQNetwork(environment_name, 
 			gamma=args.gamma,
 			alpha=args.alpha,
@@ -478,8 +479,8 @@ def main(args):
 			num_past_states=args.num_past_states)
 	elif args.model == 'DuelingDeepQNetwork':
 		shared_hidden_sizes = [10,10]
-		value_advantage_hidden_sizes = [5,5]
-		action_advantage_hidden_sizes = [5,5]
+		value_advantage_hidden_sizes = [10]
+		action_advantage_hidden_sizes = [10]
 		Q = DuelingDeepQNetwork(environment_name, 
 			gamma=args.gamma,
 			alpha=args.alpha,
@@ -503,6 +504,7 @@ def main(args):
 
 
 	if args.train:
+		print("TRAINING %s -- SAVING TO %s\n-------------------------------------------------" % (args.model, args.exp_folder))
 		os.system("mkdir -p %s " % args.exp_folder)
 		agent.train(experience_replay=args.experience_replay,
 			num_episodes=args.train,
