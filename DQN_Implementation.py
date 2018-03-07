@@ -300,25 +300,22 @@ class DQN_Agent():
 	def greedy_policy(self, q_values):
 		return np.argmax(q_values)
 
-	def train(self, num_episodes=100000, epsilon_0=0.5, epsilon_T=0.05, experience_replay=0):
+	def train(self, num_episodes=100000, epsilon_0=0.5, epsilon_T=0.05, decay_over=100000, experience_replay=0):
 		# In this function, we will train our network. 
 		# If training without experience replay_memory, then you will interact with the environment 
 		# in this function, while also updating your network parameters. 
 
 		# If you are using a replay memory, you should interact with environment here, and store these 
 		# transitions to memory, while also updating your model.
-		decay_factor = (epsilon_0 - epsilon_T)/float(num_episodes)
+		decay_factor = (epsilon_0 - epsilon_T)/float(decay_over)
 
 		if experience_replay:
 			self.burn_in_memory()
 
 		best_reward = float('-Inf')
 		training_rewards = []
+		total_iterations = 0
 		for t in range(num_episodes):
-			if t < 500:
-				eps = 1.0
-			else:
-				eps = epsilon_0 - (t - 500) * decay_factor
 			done = False
 			s = self.env.reset()
 			# self.env.render()
@@ -326,6 +323,7 @@ class DQN_Agent():
 			reward = 0
 			steps = 0
 			while not done:
+				eps = max(epsilon_T, epsilon_0 - total_iterations * decay_factor)
 				if len(last_few_states) == self.num_past_states:
 					a = self.epsilon_greedy_policy(eps, self.Q.get_Qvalues(np.concatenate(last_few_states)))
 				else:
@@ -354,6 +352,7 @@ class DQN_Agent():
 				else:
 					last_few_states.append(s)
 				steps += 1
+				total_iterations += 1
 				# if done and steps < 200:
 				# 	print('reached goal', steps)
 
@@ -463,7 +462,7 @@ def main(args):
 			alpha=args.alpha,
 			num_past_states=args.num_past_states)
 	elif args.model == 'DeepQNetwork':
-		hidden_sizes = [10, 10, 10]
+		hidden_sizes = [30, 30, 30]
 		Q = DeepQNetwork(environment_name, 
 			gamma=args.gamma,
 			alpha=args.alpha,
@@ -497,6 +496,7 @@ def main(args):
 		os.system("mkdir -p %s " % args.exp_folder)
 		agent.train(experience_replay=args.experience_replay,
 			num_episodes=args.train,
+                        decay_over=100000,
 			epsilon_0=0.5,
 			epsilon_T=0.05)
 
