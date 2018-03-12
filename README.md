@@ -2,7 +2,8 @@
 
 To train and test a model on a specified environment, run the following command:
 
->> python3 DQN_Implementation.py \
+~~~~
+>> python DQN_Implementation.py \
     --env <env-name: MountainCar-v0/CartPole-v0> \
     --train <number of episodes to train for> \
     --replay <0: no experience replay, 1: use experience replay> \
@@ -16,9 +17,11 @@ To train and test a model on a specified environment, run the following command:
     --render <1: render the environment, 0: don't render>
     --alpha <learning rate>
     --record_video <path to directory where to save video after finishing training/testing>
+~~~~
 
 For example, to run Linear Q-Network for CartPole-v0, run the following command:
->> python3 DQN_Implementation.py \
+~~~~
+>> python DQN_Implementation.py \
     --env CartPole-v0 \
     --train 8000 \
     --replay 0 \
@@ -27,9 +30,11 @@ For example, to run Linear Q-Network for CartPole-v0, run the following command:
     --exp_folder "CartPole__LinearNoReplay" \
     --num_past_states 4 \
     --repeated_sampling 0
+~~~~ 
 
 To simply test a trained model and also record video of it,
->> python3 DQN_Implementation.py \
+~~~~
+>> python DQN_Implementation.py \
     --env CartPole-v0 \
     --train 0 \
     --replay 0 \
@@ -39,3 +44,4 @@ To simply test a trained model and also record video of it,
     --repeated_sampling 0 \
     --model_file "CartPole__LinearNoReplay/epoch-1000"
     --record_video "cartpole_lqn_epoch1000"
+~~~~
