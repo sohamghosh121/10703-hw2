@@ -9,6 +9,7 @@ np.random.seed(42)
 
 import math
 
+import keras
 from keras.models import Model, load_model
 from keras.initializers import RandomNormal, TruncatedNormal
 from keras.layers import Input, Dense, Activation, Merge, Lambda
@@ -34,18 +35,20 @@ ACTION_SPACE = {
 
 def huber_loss(y_true, y_pred, clip_delta=1.0):
   error = y_true - y_pred
-  cond  = tf.keras.backend.abs(error) < clip_delta
+  cond  = K.abs(error) < clip_delta
 
-  squared_loss = 0.5 * tf.keras.backend.square(error)
-  linear_loss  = clip_delta * (tf.keras.backend.abs(error) - 0.5 * clip_delta)
+  squared_loss = 0.5 * K.square(error)
+  linear_loss  = clip_delta * (K.abs(error) - 0.5 * clip_delta)
 
   return tf.where(cond, squared_loss, linear_loss)
 
-'''
- ' Same as above but returns the mean loss.
-'''
 def huber_loss_mean(y_true, y_pred, clip_delta=1.0):
-  return K.mean(huber_loss(y_true, y_pred, clip_delta))
+	"""
+		Implements Huber loss for Keras
+	"""
+  	return K.mean(huber_loss(y_true, y_pred, clip_delta))
+
+keras.losses.huber_loss_mean = huber_loss_mean # add this to Keras's list of losses
 
 import sys
 def print_dot():
@@ -53,15 +56,11 @@ def print_dot():
 	sys.stdout.flush() 
 
 class Replay_Memory():
-	memory = []
+	"""
+		Stores transitions from which samples are drawn from using random.sample
+		Uses a deque object to maintain a fixed buffer size (discards old elements)
+	"""
 	def __init__(self, memory_size=50000, burn_in=10000):
-
-		# The memory essentially stores transitions recorder from the agent
-		# taking actions in the environment.
-
-		# Burn in episodes define the number of episodes that are written into the memory from the 
-		# randomly initialized agent. Memory size is the maximum size after which old elements in the memory are replaced. 
-		# A simple (if not the most efficient) was to implement the memory is as a list of transitions.
 		self.memory = deque([], memory_size)
 		self.memory_size = memory_size
 		self.burn_in = burn_in
@@ -69,33 +68,31 @@ class Replay_Memory():
 		
 
 	def sample_batch(self, batch_size=32):
-		# This function returns a batch of randomly sampled transitions - i.e. state, action, reward, next state, terminal flag tuples. 
-		# You will feed this to your model to train.
+		"""
+			Use random.sample to sample a batch_size size of transitions from memory
+		"""
 		sampled = random.sample(self.memory, batch_size)
 		return sampled
 
 
 	def append(self, transition):
-		# Appends transition to the memory.
+		"""
+			Add transition to memory. Since we use deque, this takes care of the
+			list length automatically
+		"""
 		self.memory.append(transition)
-		# if len(self.memory) >= self.memory_size:
-		# 	self.memory_full = True
-		# 	self.memory = self.memory[len(self.memory) - self.memory_size + 1:] + [transition]
-		# else:
-		# 	self.memory.append(transition)
 
 """
 	Q-Networks
 """
 class QNetwork():
-
-	# This class essentially defines the network architecture. 
-	# The network should take in state of the world as an input, 
-	# and output Q values of the actions available to the agent as the output. 
-
-	def __init__(self, environment_name, gamma=0.99, alpha=0.0001, num_past_states=10):
-		# Define your network architecture here. It is also a good idea to define any training operations 
-		# and optimizers here, initialize your variables, or alternately compile your model here. 
+	"""
+		This is the base class inherited by all our models.
+		It calls init_network which should be overridden by each model that sets
+		up the network architecture
+		This also sets some of the hyperparameters (gamma, learning rate, how many states)
+	"""
+	def __init__(self, environment_name, gamma=0.99, alpha=0.0001, num_past_states=4):
 		self.environment_name = environment_name
 		self.gamma = gamma
 		self.alpha = alpha
@@ -103,13 +100,28 @@ class QNetwork():
 		self.init_network()
 
 	def init_network(self):
+		"""
+			Should be overridden by subclasses
+			- create network architecture
+			- set optimizer
+			- compile model
+		"""
 		pass
 
 	def get_Qvalues(self, state):
+		"""
+			Calls self.model to get the Q values for different actions
+		"""
 		state = np.array(state).reshape(self.input_size)
 		return self.model.predict(state).reshape(-1)
 
 	def train(self, observations):
+		"""
+			Implements the Q-learning training procedure
+			- creates a batch of inputs, targets where targets are calculated
+			using the Q network
+			- calls self.model.fit for this batch
+		"""
 		inputs = []
 		targets = []
 		for observation in observations:
@@ -128,37 +140,42 @@ class QNetwork():
 		inputs = np.array(inputs)
 		self.model.fit(inputs, targets, epochs=1, verbose=0)
 
-	def save_model_weights(self, suffix):
-		# Helper function to save your model / weights.
-		self.model.save(suffix)
+	def save_model_weights(self, filename):
+		# Helper function to save model.
+		self.model.save(filename)
 
 	def load_model_weights(self,filename):
-		# Helper funciton to load model weights. 
+		# Helper funciton to load model. 
 		self.model = load_model(filename)
 
 
 class LinearQNetwork(QNetwork):
+	"""
+		Q(s, a) = w^T phi(s, a)
+	"""
 	def __init__(self, environment_name, gamma=0.99, alpha=0.0001, num_past_states=10):
 		self.name = 'LinearQNetwork'
 		super(LinearQNetwork, self).__init__(environment_name, gamma, alpha, num_past_states)
 
 	def init_network(self):
+		"""
+			Creates a linear network with no activations and no hidden layers
+		"""
 		self.input_size = (1, STATE_SPACE[self.environment_name] * self.num_past_states)
 		self.inputs = Input(shape=(STATE_SPACE[self.environment_name] * self.num_past_states, )) # we take past 4 states
 		self.outputs = Dense(ACTION_SPACE[self.environment_name],
-			kernel_initializer='glorot_normal',
-			bias_initializer='glorot_normal'
+			kernel_initializer=RandomNormal(0, 1.0)
 		)(self.inputs)
-
-		# self.outputs = Dense(ACTION_SPACE[self.environment_name],
-			# kernel_initializer=RandomNormal(mean=0.0, stddev=0.05))(self.inputs)
-
 		self.model = Model(inputs=self.inputs, outputs=self.outputs)
 		opt = Adam(lr=self.alpha)
 		self.model.compile(optimizer=opt, loss='mean_squared_error')
 
 
-class DeepQNetwork(QNetwork): # MLP
+class DeepQNetwork(QNetwork):
+	"""
+		This is a multi-layered perceptron with specified number of hidden layers
+		and specified activation function
+	"""
 	def __init__(self, environment_name, gamma=0.99, alpha=0.0001, num_past_states=4, hidden_sizes=[10], activation='relu'):
 		self.name = 'DeepQNetwork'
 		self.hidden_sizes = hidden_sizes
@@ -167,13 +184,13 @@ class DeepQNetwork(QNetwork): # MLP
 
 	def init_network(self):
 		self.input_size = (1, STATE_SPACE[self.environment_name] * self.num_past_states)
-		self.inputs = Input(shape=(STATE_SPACE[self.environment_name] * self.num_past_states, )) # we take past 4 states
+		self.inputs = Input(shape=(STATE_SPACE[self.environment_name] * self.num_past_states, ))
 		self.hidden_layers = []
 		for i, h_sz in enumerate(self.hidden_sizes):
-			if i == 0:
+			if i == 0: # if the first hidden layer, take the input layer as input to the hidden layer
 				h_layer = Dense(h_sz)(self.inputs)
 				h_layer = Activation(self.activation)(h_layer)
-			else:
+			else: # else the hidden layer should take the previous hidden layer as input
 				h_layer = Dense(h_sz)(self.hidden_layers[-1])
 				h_layer = Activation(self.activation)(h_layer)
 			self.hidden_layers.append(h_layer)
@@ -181,10 +198,18 @@ class DeepQNetwork(QNetwork): # MLP
 		self.outputs = Dense(ACTION_SPACE[self.environment_name])(self.hidden_layers[-1])
 		self.model = Model(inputs=self.inputs, outputs=self.outputs)
 		opt = Adam(lr=self.alpha)
-		self.model.compile(optimizer=opt, loss='mean_squared_error')
+		self.model.compile(optimizer=opt, loss=huber_loss_mean)
 
 
 class DuelingDeepQNetwork(QNetwork):
+	"""
+		This is a multi-layered perceptron with specified number of hidden layers
+		and specified activation function with a branching architecture.
+
+		Inputs to the constructor shared_hidden_sizes,  value_advantage_hidden_sizes,
+		action_advantage_hidden_sizes define how many hidden layers (and their sizes)
+		in each part of the network.
+	"""
 	def __init__(self,
 			environment_name,
 			gamma=0.99,
@@ -204,6 +229,8 @@ class DuelingDeepQNetwork(QNetwork):
 	def init_network(self):
 		self.input_size = (1, STATE_SPACE[self.environment_name] * self.num_past_states)
 		self.inputs = Input(shape=(STATE_SPACE[self.environment_name] * self.num_past_states, )) # we take past 4 states
+
+		# create shared part
 		self.shared_hidden_layers = []
 		for i, h_sz in enumerate(self.shared_hidden_sizes):
 			if i == 0:
@@ -214,6 +241,7 @@ class DuelingDeepQNetwork(QNetwork):
 				h_layer = Activation(self.activation)(h_layer)
 			self.shared_hidden_layers.append(h_layer)
 
+		# create value advantage part
 		self.value_adv_hidden_layers = []
 		for i, h_sz in enumerate(self.value_advantage_hidden_sizes):
 			if i == 0:
@@ -224,6 +252,7 @@ class DuelingDeepQNetwork(QNetwork):
 				h_layer = Activation(self.activation)(h_layer)
 			self.value_adv_hidden_layers.append(h_layer)
 
+		# create action advantage part
 		self.action_adv_hidden_layers = []
 		for i, h_sz in enumerate(self.action_advantage_hidden_sizes):
 			if i == 0:
@@ -257,27 +286,15 @@ class DuelingDeepQNetwork(QNetwork):
 		self.model.compile(optimizer=opt, loss='mean_squared_error')
 
 
-class ConvDuelingDeepQNetwork(QNetwork):
-	pass
-
-
 
 class DQN_Agent():
-
-	# In this class, we will implement functions to do the following. 
-	# (1) Create an instance of the Q Network class.
-	# (2) Create a function that constructs a policy from the Q values predicted by the Q Network. 
-	#		(a) Epsilon Greedy Policy.
-	# 		(b) Greedy Policy. 
-	# (3) Create a function to train the Q Network, by interacting with the environment.
-	# (4) Create a function to test the Q Network's performance on the environment.
-	# (5) Create a function for Experience Replay.
-	
+	"""
+		This is the agent class.
+		- initiates the environment by calling gym.make
+		- chooses where to store models
+		- other parameters include whether to repeatedly sample an action or not
+	"""
 	def __init__(self, environment_name, render=False, save_dir='.', num_past_states=10, repeated_sampling=0):
-
-		# Create an instance of the network itself, as well as the memory. 
-		# Here is also a good place to set environmental parameters,
-		# as well as training parameters - number of episodes / iterations, etc. 
 		self.num_past_states = num_past_states
 		self.render = render
 		self.replay_memory = Replay_Memory()
@@ -286,10 +303,16 @@ class DQN_Agent():
 		self.repeated_sampling = repeated_sampling
 
 	def Q_network(self, qnet):
+		"""
+			Set Q-Network for this agent
+			IMPORTANT: This should be called before training the agent.
+		"""
 		self.Q = qnet
 
 	def epsilon_greedy_policy(self, epsilon, q_values):
-		# Creating epsilon greedy probabilities to sample from.
+		"""
+			Creating epsilon greedy probabilities to sample from.
+		"""
 		coin = np.random.random()
 		greedy_action = self.greedy_policy(q_values)
 		if coin > epsilon:
@@ -298,97 +321,104 @@ class DQN_Agent():
 			return np.random.choice([x for x in range(len(q_values))])
 
 	def greedy_policy(self, q_values):
+		"""
+			Get greedy policy (argmax_a Q(s, a))
+		"""
 		return np.argmax(q_values)
 
 	def train(self, num_episodes=100000, epsilon_0=0.5, epsilon_T=0.05, decay_over=100000, experience_replay=0):
-		# In this function, we will train our network. 
-		# If training without experience replay_memory, then you will interact with the environment 
-		# in this function, while also updating your network parameters. 
 
-		# If you are using a replay memory, you should interact with environment here, and store these 
-		# transitions to memory, while also updating your model.
+		# calculate how much to decay epsilon by every episode
 		decay_factor = (epsilon_0 - epsilon_T)/float(decay_over)
 
+		# if experience replay is chosen, first we need to burn in memory
 		if experience_replay:
 			self.burn_in_memory()
 
-		best_reward = float('-Inf')
 		training_rewards = []
 		total_iterations = 0
 		for t in range(num_episodes):
+			eps = max(epsilon_T, epsilon_0 - t * decay_factor)
 			done = False
 			s = self.env.reset()
 			if self.render:
 				self.env.render()
 			last_few_states = [s]
 			reward = 0
-			steps = 0
 			repeats_left = self.repeated_sampling
 			a = None
 			while not done:
-				eps = max(epsilon_T, epsilon_0 - total_iterations * decay_factor)
 				if len(last_few_states) == self.num_past_states and repeats_left == 0:
+					# if no more repeats left, and need to sample new action, and already have enough past actions
 					a = self.epsilon_greedy_policy(eps, self.Q.get_Qvalues(np.concatenate(last_few_states)))
 					repeats_left = self.repeated_sampling
 				elif len(last_few_states) < self.num_past_states:
+					# this case is for the start when we don't have enough past states
 					a = self.env.action_space.sample()
-				elif a is None: # last corner case
+				elif a is None:
+					# last corner case
 					a = self.epsilon_greedy_policy(eps, self.Q.get_Qvalues(np.concatenate(last_few_states)))
-				repeats_left -= 1
-				s_, r, done, info = self.env.step(a)
-				if self.render:
+				else:
+					# if repeating action, don't sample again
+					repeats_left -= 1
+				s_, r, terminal, info = self.env.step(a) # take action
+				if self.render: 
 					self.env.render()
 				reward += r
 				if not experience_replay:
+					# if not using experience replay, use this transition
 					if len(last_few_states) >= self.num_past_states:
 						self.Q.train(
 							[(
 								last_few_states, 
 								a,
 								r,
-								done,
+								terminal,
 								s_
 							)]
 						)
 				else:
+					# using experience replay -> sample a batch, and train on that
 					observations = self.replay_memory.sample_batch()
 					self.Q.train(observations)
 					if len(last_few_states) == self.num_past_states:
-						self.replay_memory.append((last_few_states, a, r, done, s_))
+						self.replay_memory.append((last_few_states, a, r, terminal, s_))
+				
+				# update
 				s = s_
 				if len(last_few_states) >= self.num_past_states:
 					last_few_states = last_few_states[1:] + [s]
 				else:
 					last_few_states.append(s)
-				steps += 1
 				total_iterations += 1
 
+			# this is used to calculate average training reward at the end of an episode
 			training_rewards.append(reward)
 			
 			print_dot()	
-			if (t + 1) % 10 == 0:
+			if (t + 1) % 100 == 0: # every 100 episodes, test agent
 				avg_reward = self.test(render=self.render)
 				sys.stdout.write(' Training Reward  ' + str(np.mean(training_rewards)))
 				sys.stdout.write(' Testing Reward @ epoch ' +  str(t + 1) + ':   ' + str(avg_reward) + '\n')
 				self.Q.save_model_weights(self.save_dir + '/epoch-%d' % (t + 1))
-				best_reward = avg_reward
 				training_rewards = []
 				
 
 	def run_test(self, render):
+		"""
+			Runs 1 episode of greedy policy with epsilon 0.05
+		"""
 		done = False
 		cum_reward = 0.0
 		s = self.env.reset()
 		if render:
 			self.env.render()
 		last_few_states = [s]
-		# print('------------NEW TEST-------------')
 		while not done:
 			if len(last_few_states) >= self.num_past_states:
 				a = self.epsilon_greedy_policy(0.05, self.Q.get_Qvalues(np.concatenate(last_few_states)))
 			else:
 				a = self.env.action_space.sample()
-			# print(a)
 			s_, r, done, info = self.env.step(a)
 			cum_reward += r
 			s = s_
@@ -404,8 +434,9 @@ class DQN_Agent():
 
 
 	def test(self, model_file=None, num_episodes=20, render = False):
-		# Evaluate the performance of your agent over 100 episodes, by calculating cummulative rewards for the 100 episodes.
-		# Here you need to interact with the environment, irrespective of whether you are using a memory. 
+		"""
+			Calls run_test num_episodes times to get testing reward
+		"""
 		if model_file:
 			self.Q_network.load_model_weights(model_file)
 		# do testing
@@ -413,11 +444,20 @@ class DQN_Agent():
 		for ep_num in range(num_episodes):
 			cumulative_reward = self.run_test(render)
 			rewards.append(cumulative_reward)
-		return np.mean(rewards)
-		
+		return np.mean(rewards), np.std(rewards)
 
+	def record_video(self, model_file=None, video_dir='.'):
+		"""
+			Wrap the environment in a monitor to record video to specified 
+			directory
+		"""
+		self.env = gym.wrappers.Monitor(self.env, video_dir) # this should automatically generate videos
+		self.run_test(False)
+				
 	def burn_in_memory(self):
-		# Initialize your replay memory with a burn_in number of episodes / transitions.
+		"""
+			Randomly sample actions to create burn in memory for agent
+		"""
 		while True:
 			done = False
 			s = self.env.reset()
@@ -438,10 +478,9 @@ def parse_arguments():
 	parser = argparse.ArgumentParser(description='Deep Q Network Argument Parser')
 	parser.add_argument('--env',dest='env',type=str)
 	parser.add_argument('--render',dest='render',type=int,default=0)
-	parser.add_argument('--train',dest='train',type=int,default=1)
+	parser.add_argument('--train',dest='train',type=int,default=0)
 	parser.add_argument('--test',dest='test',type=int,default=20)
 	parser.add_argument('--replay',dest='experience_replay',type=int,default=0)
-	parser.add_argument('--batch_size',dest='batch_size',type=int,default=32)
 	parser.add_argument('--gamma',dest='gamma',type=float,default=0.99)
 	parser.add_argument('--alpha',dest='alpha',type=float,default=0.0001)
 	parser.add_argument('--model',dest='model',type=str,default='LinearQNetwork')
@@ -449,6 +488,7 @@ def parse_arguments():
 	parser.add_argument('--exp_folder',dest='exp_folder',type=str,default='.')
 	parser.add_argument('--num_past_states',dest='num_past_states',type=int,default=4)
 	parser.add_argument('--repeated_sampling',dest='repeated_sampling',type=int,default=0)
+	parser.add_argument('--record_video',dest='record_video',type=str)
 	return parser.parse_args()
 
 def main(args):
@@ -461,8 +501,6 @@ def main(args):
 	config = tf.ConfigProto(gpu_options=gpu_ops)
 	sess = tf.Session(config=config)
 
-	# You want to create an instance of the DQN_Agent class here, and then train / test it. 
-
 
 	if args.model == 'LinearQNetwork':
 		Q = LinearQNetwork(environment_name,
@@ -470,16 +508,24 @@ def main(args):
 			alpha=args.alpha,
 			num_past_states=args.num_past_states)
 	elif args.model == 'DeepQNetwork':
-		hidden_sizes = [30, 30, 30]
+		if args.env == 'MountainCar-v0':
+			hidden_sizes = [30, 30, 30]
+		elif args.env == 'CartPole-v0':
+			hidden_sizes = [10, 10, 10]
 		Q = DeepQNetwork(environment_name, 
 			gamma=args.gamma,
 			alpha=args.alpha,
 			hidden_sizes=hidden_sizes,
 			num_past_states=args.num_past_states)
 	elif args.model == 'DuelingDeepQNetwork':
-		shared_hidden_sizes = [10,10]
-		value_advantage_hidden_sizes = [5,5]
-		action_advantage_hidden_sizes = [5,5]
+		if args.env == 'MountainCar-v0':
+			shared_hidden_sizes = [30,30]
+			value_advantage_hidden_sizes = [30]
+			action_advantage_hidden_sizes = [30]
+		elif args.env == 'CartPole-v0':
+			shared_hidden_sizes = [10,10]
+			value_advantage_hidden_sizes = [10]
+			action_advantage_hidden_sizes = [10]
 		Q = DuelingDeepQNetwork(environment_name, 
 			gamma=args.gamma,
 			alpha=args.alpha,
@@ -506,13 +552,17 @@ def main(args):
 		os.system("mkdir -p %s " % args.exp_folder)
 		agent.train(experience_replay=args.experience_replay,
 			num_episodes=args.train,
-                        decay_over=100000,
-			epsilon_0=0.5,
-			epsilon_T=0.05)
+				decay_over=100000,
+				epsilon_0=0.5,
+				epsilon_T=0.05)
 
 
-	avg_reward = agent.test(render=args.render, num_episodes=args.test)
-	print('Final average reward: ', avg_reward)
+	if args.test:
+		avg_reward, stddev_reward = agent.test(render=args.render, num_episodes=args.test)
+		print('Final average reward: ', avg_reward, '+/-', stddev_reward)
+
+	if args.record_video:
+		agent.record_video(video_dir=args.record_video)
 
 if __name__ == '__main__':
 	main(sys.argv)
